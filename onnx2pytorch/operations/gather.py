@@ -12,7 +12,7 @@ class Gather(nn.Module):
         selection = self.selection + [indices.to(torch.int64)]
         # return data.__getitem__(selection)
         if indices == -1:
-            indices = torch.tensor(data.shape[self.dim] - 1)
+            indices = torch.tensor(data.shape[self.dim] - 1, device=data.device)
 
         if indices.ndim == 0:
             return torch.index_select(data, dim=self.dim, index=indices).squeeze(self.dim)

@@ -34,8 +34,8 @@ class Split(Operator):
             ), "One of the parameters needs to be set."
         self.enable_pruning = enable_pruning
         self.dim = dim
-        # self.split_size_or_sections = split_size_or_sections
-        self.split_size_or_sections = (split_size_or_sections[0], 1)
+        self.split_size_or_sections = split_size_or_sections
+        # self.split_size_or_sections = (split_size_or_sections[0], 1)
         self.number_of_splits = number_of_splits
         self.keep_size = keep_size
         self.input_indices = None

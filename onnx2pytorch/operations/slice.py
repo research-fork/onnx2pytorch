@@ -56,8 +56,23 @@ class Slice(nn.Module):
             self, x: torch.Tensor, starts=None, ends=None, axes=None, steps=None
     ):
         start = self.starts if starts is None else starts
+        if isinstance(start, tuple):
+            assert len(start) == 1
+            start = start[0]
+            
         end = self.ends if ends is None else ends
-        axes = self.axes if axes is None else axes
+        if isinstance(end, tuple):
+            assert len(end) == 1
+            end = end[0]
+        
+        axes = self.dim if axes is None else axes
+        if isinstance(axes, list):
+            assert len(axes) == 1
+            axes = axes[0]
+            
+        steps = self.steps if steps is None else steps
+        steps = 1 if steps is None else steps
+        
         assert (steps == 1 or steps == -1) and axes == int(axes) and start == int(start) and end == int(end)
         shape = x.shape if isinstance(x, torch.Tensor) else [len(x)]
         start, end = self._fixup_params(shape, start, end, axes, steps)
@@ -66,52 +81,4 @@ class Slice(nn.Module):
             final = torch.flip(final, dims=tuple(axes))
         return final
 
-    """ old implementation
-  
-    def forward(
-        self, data: torch.Tensor, starts=None, ends=None, axes=None, steps=None
-    ):
-        if axes is None:
-            axes = self.dim
-        if starts is None:
-            starts = self.starts
-        if ends is None:
-            ends = self.ends
-        if steps is None:
-            steps = self.steps
-
-        if isinstance(starts, (tuple, list)):
-            starts = torch.tensor(starts, device=data.device)
-        if isinstance(ends, (tuple, list)):
-            ends = torch.tensor(ends, device=data.device)
-        if isinstance(steps, (tuple, list)):
-            steps = torch.tensor(steps, device=data.device)
-
-        # If axes=None set them to (0, 1, 2, ...)
-        if axes is None:
-            axes = tuple(torch.arange(len(starts)))
-        if steps is None:
-            steps = tuple(torch.tensor(1) for _ in axes)
-
-        axes = [data.ndim + x if x < 0 else x for x in axes]
-
-        selection = [slice(None) for _ in range(max(axes) + 1)]
-
-        flip_dims = []
-        for i, axis in enumerate(axes):
-            raw_slice = slice(
-                starts[i].to(dtype=torch.long, device=data.device),
-                ends[i].to(dtype=torch.long, device=data.device),
-                steps[i].to(dtype=torch.long, device=data.device),
-            )
-            if steps[i] < 0:
-                selection[axis] = _to_positive_step(raw_slice, data.shape[axis])
-                flip_dims.append(axis)
-            else:
-                selection[axis] = raw_slice
-        if len(flip_dims) > 0:
-            return torch.flip(data.__getitem__(selection), flip_dims)
-        else:
-            # For torch < 1.8.1, torch.flip cannot handle empty dims
-            return data.__getitem__(selection)
-    """
+    
