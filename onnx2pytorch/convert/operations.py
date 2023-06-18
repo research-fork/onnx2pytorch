@@ -75,7 +75,6 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
     iterator: (op_id, op_name, op)
     """
     weights = {tensor.name: tensor for tensor in onnx_graph.initializer}
-
     for i, node in enumerate(onnx_graph.node):
         # extract only useful inputs
         params = [weights[par_name] for par_name in node.input if par_name in weights]
