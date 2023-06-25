@@ -77,6 +77,7 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
     weights = {tensor.name: tensor for tensor in onnx_graph.initializer}
     for i, node in enumerate(onnx_graph.node):
         # extract only useful inputs
+        is_nhwc = False
         params = [weights[par_name] for par_name in node.input if par_name in weights]
 
         if node.op_type == "Add":
@@ -151,27 +152,48 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
         elif node.op_type == "MatMul":
             if params:
                 weight = torch.tensor(numpy_helper.to_array(params[0]))
+                # print(weight.ndim)
+                # print(node.input)
+                # print(list(weights.keys()))
                 if node.input[0] in weights:
-                    op = nn.Linear(weight.shape[1], weight.shape[0], bias=False)
-                    op.weight.data = weight
+                    # op = nn.Linear(weight.shape[1], weight.shape[0], bias=False)
+                    # op.weight.data = weight
+                    if weight.ndim == 2:
+                        op = nn.Linear(weight.shape[1], weight.shape[0], bias=False)
+                        op.weight.data = weight
+                    else:
+                        op = MatMul()
                 else:
                     op = nn.Linear(weight.shape[0], weight.shape[1], bias=False)
                     op.weight.data = weight.t()
                     
                 # check if next node Add to add bias
-                if i + 1 < len(onnx_graph.node):
+                if i < len(onnx_graph.node) - 1:
                     next_node = onnx_graph.node[i + 1]
-                    next_params = [
-                        weights[par_name]
-                        for par_name in next_node.input
-                        if par_name in weights
-                    ]
-                    if next_params and next_node.op_type == "Add":
-                        bias = torch.tensor(numpy_helper.to_array(next_params[0]))
-                        op.bias = nn.Parameter(bias)
-                        node.output.pop()
-                        node.output.extend(next_node.output)
-                        onnx_graph.node.pop(i + 1)  # remove next node
+                    # print(next_node.op_type)
+                    # print('weights:', list(weights.keys()))
+                    # print('next input[0]', next_node.input[0])
+                    # print('next input[1]', next_node.input[1])
+                    # print('current input[0]:', node.input[0])
+                    # print('current input[1]:', node.input[1])
+                    # print('current output[0]:', node.output[0])
+                    if len(next_node.input) == 2 and next_node.op_type == "Add":
+                        use_bias = False
+                        if ((next_node.input[0] in weights) or (next_node.input[1] in weights)) and (node.output[0] in next_node.input):
+                            if   (next_node.input[1] in weights):
+                                bias = torch.tensor(numpy_helper.to_array(weights[next_node.input[1]]))
+                                use_bias = True
+                            elif (next_node.input[0] in weights):
+                                bias = torch.tensor(numpy_helper.to_array(weights[next_node.input[0]]))
+                                use_bias = True
+                        if use_bias:
+                            op.bias = nn.Parameter(bias)
+                            node.output.pop()
+                            node.output.extend(next_node.output)
+                            onnx_graph.node.pop(i + 1)  # remove next node
+                #         print('bias:', use_bias)
+                # print(i, op, len(onnx_graph.node))
+                # print()
             else:
                 op = MatMul()
         elif node.op_type == "Max":
@@ -270,7 +292,20 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
         elif node.op_type == "TopK":
             op = TopK()
         elif node.op_type == "Transpose":
-            op = Transpose(**extract_attributes(node))
+            # op = Transpose(**extract_attributes(node))
+            # nhwc
+            if i == 0 and extract_attributes(node)['dims'] == (0, 3, 1, 2): 
+                next_node = onnx_graph.node[i + 1]
+                assert next_node.op_type == 'Conv'
+                for i_, inp in enumerate(next_node.input):
+                    if inp == node.output[0]:
+                        next_node.input[i_] = node.input[0]
+                        break
+                op = None
+                is_nhwc = True
+            else:
+                # https://github.com/KaidiXu/onnx2pytorch/commit/b96e9f9591a53367cd302301fcd0d6695f924f21
+                op = Transpose(**{**extract_attributes(node), **{"quirks": quirks.get("Transpose", {})}})
         elif node.op_type == "Unsqueeze":
             op = Unsqueeze(opset_version=opset_version, **extract_attributes(node))
         elif node.op_type == "Upsample":
@@ -294,4 +329,4 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
 
         op_name = "{}_{}".format(node.op_type, node.output[0])
         op_id = node.output[0]
-        yield op_id, op_name, op
+        yield op_id, op_name, op, is_nhwc

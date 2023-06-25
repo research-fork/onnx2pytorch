@@ -116,6 +116,7 @@ class ConvertModel(nn.Module):
         self.experimental = experimental
         self.debug = debug
         self.enable_pruning = enable_pruning
+        self.is_nhwc = False
 
         self.input_names = get_inputs_names(onnx_model.graph)
         self.output_names = get_outputs_names(onnx_model.graph)
@@ -124,7 +125,7 @@ class ConvertModel(nn.Module):
 
         # Create mapping from node (identified by first output) to submodule
         self.mapping = {}
-        for op_id, op_name, op in convert_operations(
+        for op_id, op_name, op, is_nhwc in convert_operations(
             onnx_model.graph,
             opset_version,
             batch_dim,
@@ -135,6 +136,7 @@ class ConvertModel(nn.Module):
             if isinstance(op, Loop) and debug:
                 raise NotImplementedError("debug-mode with Loop node not implemented.")
             self.mapping[op_id] = op_name
+            self.is_nhwc = self.is_nhwc or is_nhwc
 
         # Store initializers as buffers
         for tensor in self.onnx_model.graph.initializer:
@@ -185,6 +187,9 @@ class ConvertModel(nn.Module):
 
             # getting correct layer
             op = getattr(self, out_op_name)
+            if op is None:
+                continue
+            # print(out_op_id, out_op_name, op)
 
             # if first layer choose input as in_activations
             # if not in_op_names and len(node.input) == 1:
@@ -215,7 +220,12 @@ class ConvertModel(nn.Module):
                 for out_op_id, output in zip(node.output, outputs):
                     activations[out_op_id] = output
             elif isinstance(op, partial) and op.func == torch.cat:
+                # print(out_op_id, op.func)
+                # print(out_op_id in activations, )
+                # print([_.shape for _ in in_activations])
                 activations[out_op_id] = op(in_activations)
+                # print(op(in_activations))
+                # print()
             elif isinstance(op, Identity):
                 # After batch norm fusion the batch norm parameters
                 # were all passed to identity instead of first one only

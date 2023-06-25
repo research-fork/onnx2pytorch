@@ -38,13 +38,21 @@ class Resize(Operator):
 
         if len(scales) == 0:
             scales = None
+            # print(sizes)
         elif len(sizes) == 0:
             sizes = None
+            # print(scales)
         else:
             raise ValueError(
                 "Only one of the two, scales or sizes, needs to be defined."
             )
-
+            
+        if sizes is not None:    
+            sizes = [float(_) if isinstance(_, torch.Tensor) else _ for _ in sizes ]
+        
+        if scales is not None:
+            scales = [float(_) if isinstance(_, torch.Tensor) else _ for _ in scales]
+            
         return F.interpolate(
             inp,
             scale_factor=scales,
