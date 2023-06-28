@@ -78,6 +78,7 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
     for i, node in enumerate(onnx_graph.node):
         # extract only useful inputs
         is_nhwc = False
+        is_last_removed = False
         params = [weights[par_name] for par_name in node.input if par_name in weights]
 
         if node.op_type == "Add":
@@ -263,9 +264,13 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
         elif node.op_type == "Slice":
             op = Slice(**extract_attributes(node))
         elif node.op_type == "Softmax":
-            kwargs = dict(dim=-1)
-            kwargs.update(extract_attributes(node))
-            op = nn.Softmax(**kwargs)
+            if node == onnx_graph.node[-1] and quirks.get(node.op_type, {}).get('skip_last_layer', False):
+                op = nn.Identity()
+                is_last_removed = True
+            else:
+                kwargs = dict(dim=-1)
+                kwargs.update(extract_attributes(node))
+                op = nn.Softmax(**kwargs)
         elif node.op_type == "Softplus":
             op = nn.Softplus(beta=1)
         elif node.op_type == "Softsign":
@@ -303,6 +308,37 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
                         break
                 op = None
                 is_nhwc = True
+            elif quirks.get(node.op_type, {}).get('remove_spare_permute', False):
+                dims = extract_attributes(node)['dims']
+                if dims == (0, 2, 3, 1):
+                    remove_transpose = False
+                    for ii in range(i, len(onnx_graph.node)):
+                        node_tmp = onnx_graph.node[ii]
+                        # print(node_tmp.op_type)
+                        if node_tmp.op_type == node.op_type and extract_attributes(node_tmp)['dims'] == (0, 3, 1, 2):
+                            remove_transpose = True
+                            break
+                        
+                        if node_tmp.op_type in ['Reshape', 'Conv', 'ConvTranspose']:
+                            break
+                    
+                    if remove_transpose:
+                        op = nn.Identity()
+                    else:
+                        op = Transpose(**{**extract_attributes(node), **{"quirks": quirks.get("Transpose", {})}})
+                        
+                elif dims == (0, 3, 1, 2):
+                    if remove_transpose:
+                        op = nn.Identity()
+                        remove_transpose = False
+                    else:
+                        op = Transpose(**{**extract_attributes(node), **{"quirks": quirks.get("Transpose", {})}})
+                else:
+                    raise NotImplementedError()
+                
+                
+                # exit()
+            
             else:
                 # https://github.com/KaidiXu/onnx2pytorch/commit/b96e9f9591a53367cd302301fcd0d6695f924f21
                 op = Transpose(**{**extract_attributes(node), **{"quirks": quirks.get("Transpose", {})}})
@@ -329,4 +365,4 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
 
         op_name = "{}_{}".format(node.op_type, node.output[0])
         op_id = node.output[0]
-        yield op_id, op_name, op, is_nhwc
+        yield op_id, op_name, op, is_nhwc, is_last_removed
