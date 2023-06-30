@@ -57,7 +57,9 @@ class Reshape(Operator):
             #     print(f'input shape {input.shape}, new shape is {shape}.')
         elif shape[0] == 1 and self.quirks.get('fix_batch_size') is True:
             # FIXME: this looks not right.
-            shape[0] = -1
+            incomplete_indices = (shape == -1).nonzero()
+            if not len(incomplete_indices):
+                shape[0] = -1
         else:
             # FIXME: this looks not right.
             # if the first dim is batch size, manually add the batch size to the shape
