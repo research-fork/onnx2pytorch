@@ -9,6 +9,7 @@ try:
 except ImportError:
     ort = None
 
+PRINT_DEBUG = False
 
 def value_wrapper(value):
     def callback(*args, **kwargs):

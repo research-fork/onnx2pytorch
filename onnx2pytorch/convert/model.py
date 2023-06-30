@@ -26,6 +26,7 @@ from onnx2pytorch.convert.operations import (
 from onnx2pytorch.utils import (
     get_inputs_names,
     get_outputs_names,
+    PRINT_DEBUG
 )
 
 
@@ -222,9 +223,13 @@ class ConvertModel(nn.Module):
                 for out_op_id, output in zip(node.output, outputs):
                     activations[out_op_id] = output
             elif isinstance(op, partial) and op.func == torch.cat:
-                # print(out_op_id, op.func)
-                # print(out_op_id in activations, )
-                # print([_.shape for _ in in_activations])
+                if PRINT_DEBUG:
+                    print('[+] Computing', node.op_type)
+                    # print(out_op_id in activations, )
+                    print('\t- inputs', [_.shape for _ in in_activations])
+                    # print('\t- inputs', [_ for _ in in_activations])
+                    # activations[out_op_id] = op([ia.squeeze() for ia in in_activations])
+                    
                 activations[out_op_id] = op(in_activations)
                 # print(op(in_activations))
                 # print()

@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 from onnx2pytorch.operations.base import Operator
-from onnx2pytorch.utils import assign_values_to_dim, get_selection
+from onnx2pytorch.utils import assign_values_to_dim, get_selection, PRINT_DEBUG
 
 
 def prod(x):
@@ -34,9 +34,11 @@ class Reshape(Operator):
 
     def forward(self, input: torch.Tensor, shape=None):
         shape = shape if shape is not None else self.shape
+        if PRINT_DEBUG:
+            print('RESHAPE:', shape, input.shape)
         if (shape[0] == 1 and (len(shape) == 4 or len(shape) == 2) and self.quirks.get('fix_batch_size') is True):
-            # incomplete_indices = (shape == -1).nonzero()
-            incomplete_indices = torch.where(shape == -1)[0]
+            incomplete_indices = (shape == -1).nonzero()
+            # incomplete_indices = torch.where(shape == -1)[0]
             # print(shape)
             # assert incomplete_indices.numel() <= 1, "at most one dimension can be -1 in reshape"
             if len(incomplete_indices):
@@ -68,7 +70,12 @@ class Reshape(Operator):
             # This raises RuntimeWarning: iterating over a tensor.
             shape = [x if x != 0 else input.size(i) for i, x in enumerate(shape)]
         if not self.enable_pruning:
-            return torch.reshape(input, tuple(shape))
+            final = torch.reshape(input, tuple(shape))
+            if PRINT_DEBUG:
+                print('\t- shape:', shape)
+                print('\t- final:', final)
+                print('\t- final:', final.shape)
+            return final
 
         inp_shape = torch.tensor(input.shape)
         if self.initial_input_shape is None:

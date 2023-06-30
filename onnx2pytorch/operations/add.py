@@ -3,7 +3,7 @@ import warnings
 import torch
 from torch import nn
 
-from onnx2pytorch.utils import is_constant, get_selection
+from onnx2pytorch.utils import is_constant, get_selection, PRINT_DEBUG
 from onnx2pytorch.operations.base import Operator
 
 
@@ -20,6 +20,9 @@ class Add(Operator):
         super().__init__()
 
     def forward(self, *input):
+        if PRINT_DEBUG:
+            print('ADD:', [_.shape for _ in input])
+        
         if self.input_indices:
             out = self.out * 0
             for inp, idx in zip(input, self.input_indices):
@@ -33,8 +36,19 @@ class Add(Operator):
         # Reorder input so that the broadcasted matrix is last
         elif all(x == 1 for x in input[0].shape):
             input = sorted(input, key=lambda x: -sum(x.shape))
+
         out = input[0].clone()
+        if PRINT_DEBUG:
+            print('\t- out:', out.shape)
+            print('\t- inputs:', [_.shape for _ in input])
+            print('\t- inputs:', input[-1])
+        
+        # if out.ndim == 1:
+        #     out = out[None]
+            
         for inp in input[1:]:
+            # if inp.numel() == 1:
+            #     inp = inp.item()
             out += inp
         return out
 
