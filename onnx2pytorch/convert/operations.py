@@ -103,6 +103,29 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
             op = ConstantOfShape(**extract_attributes(node))
         elif node.op_type == "Conv":
             op = convert_layer(node, "Conv", params)
+            if (i < len(onnx_graph.node) + 1) and (onnx_graph.node[i + 1].op_type == "BatchNormalization") and quirks.get(node.op_type, {}).get('merge_batch_norm', False):
+                next_node = onnx_graph.node[i+1]
+                next_params = [weights[par_name] for par_name in next_node.input if par_name in weights]
+                next_layer = convert_batch_norm_layer(next_node, params=next_params)
+                
+                merge_bn_weight = (next_layer.bnu.weight / (next_layer.bnu.eps + next_layer.bnu.running_var).sqrt()).diag()
+                merge_bn_bias = next_layer.bnu.bias - next_layer.bnu.weight * next_layer.bnu.running_mean / (next_layer.bnu.eps + next_layer.bnu.running_var).sqrt()
+                
+                merge_weight = torch.matmul(merge_bn_weight, op.weight.flatten(1)).view(op.weight.shape)
+                if op.bias is None:
+                    op.bias = nn.Parameter(torch.zeros(op.weight.shape[0]).float())
+
+                merge_bias = torch.matmul(merge_bn_weight, op.bias) + merge_bn_bias
+
+                with torch.no_grad():
+                    op.weight.copy_(merge_weight)
+                    op.bias.copy_(merge_bias)
+                    
+                node.output.pop()
+                node.output.extend(next_node.output)
+                onnx_graph.node.pop(i + 1)  # remove next node
+
+                
         elif node.op_type == "ConvTranspose":
             op = convert_layer(node, "ConvTranspose", params)
         elif node.op_type == "Div":
