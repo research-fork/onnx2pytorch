@@ -75,6 +75,12 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
     iterator: (op_id, op_name, op)
     """
     weights = {tensor.name: tensor for tensor in onnx_graph.initializer}
+    
+    onnx_inputs = [node.name for node in onnx_graph.input]
+    onnx_initializers = [node.name for node in onnx_graph.initializer]
+    inputs = list(set(onnx_inputs) - set(onnx_initializers))
+    inputs = [node for node in onnx_graph.input if node.name in inputs]
+    
     for i, node in enumerate(onnx_graph.node):
         # extract only useful inputs
         is_nhwc = False
@@ -98,7 +104,17 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
         elif node.op_type == "Concat":
             op = partial(torch.cat, **extract_attributes(node))
         elif node.op_type == "Constant":
-            op = Constant(**extract_attributes(node))
+            constant = extract_attributes(node)['constant']
+            next_node = onnx_graph.node[i + 1]
+            if len(constant) == 2 and (-1 in constant) and next_node.op_type == 'Reshape' \
+                    and len(node.input) == 0 and len(node.output) == 1:
+                op = Flatten()
+                node.input.extend([n_i for n_i in next_node.input if n_i != node.output[0]])
+                node.output.pop()
+                node.output.extend(next_node.output)
+                onnx_graph.node.pop(i + 1)  # remove next node
+            else:
+                op = Constant(**extract_attributes(node))
         elif node.op_type == "ConstantOfShape":
             op = ConstantOfShape(**extract_attributes(node))
         elif node.op_type == "Conv":
@@ -321,8 +337,8 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
             op = TopK()
         elif node.op_type == "Transpose":
             # op = Transpose(**extract_attributes(node))
-            # nhwc
             if i == 0 and extract_attributes(node)['dims'] == (0, 3, 1, 2): 
+                # nhwc
                 next_node = onnx_graph.node[i + 1]
                 assert next_node.op_type == 'Conv'
                 for i_, inp in enumerate(next_node.input):
@@ -331,6 +347,15 @@ def convert_operations(onnx_graph, opset_version, batch_dim=0, enable_pruning=Tr
                         break
                 op = None
                 is_nhwc = True
+            if i == 0 and extract_attributes(node)['dims'] == (0, 2, 3, 1) \
+                    and inputs[0].type.tensor_type.shape.dim[1].dim_value == 1 and quirks.get(node.op_type, {}).get('remove_gdvb_transpose', False):
+                next_node = onnx_graph.node[i + 1]
+                for i_, inp in enumerate(next_node.input):
+                    if inp == node.output[0]:
+                        next_node.input[i_] = node.input[0]
+                        break
+                op = None
+                 
             elif quirks.get(node.op_type, {}).get('remove_spare_permute', False):
                 dims = extract_attributes(node)['dims']
                 if dims == (0, 2, 3, 1):
